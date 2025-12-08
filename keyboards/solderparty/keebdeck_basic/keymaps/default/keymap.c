@@ -2,6 +2,23 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include QMK_KEYBOARD_H
+#include "quantum.h"
+#include "timer.h"
+#include "backlight.h"
+
+static uint32_t backlight_timer = 0;
+static bool     backlight_timed_out = false;
+static uint8_t  saved_backlight_level = 0;
+
+static void refresh_backlight_activity(void) {
+    backlight_timer = timer_read32();   // mark "last activity" time
+
+    // If it timed out, restore the previous brightness
+    if (backlight_timed_out) {
+        backlight_timed_out = false;
+        backlight_set(saved_backlight_level);
+    }
+}
 
 enum CUSTOM_KEYCODES {
   KC_SPC2 = SAFE_RANGE,
@@ -31,6 +48,11 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
 bool process_record_user(uint16_t keycode, keyrecord_t *record) {
     static uint8_t space_press_count = 0;
 
+    if (record->event.pressed) {
+        // Update backlight timers
+        refresh_backlight_activity();
+    }
+    
     switch (keycode) {
         case KC_SPC:
         case KC_SPC2:
@@ -50,4 +72,18 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
     }
 
     return true;
+}
+
+void housekeeping_task_user(void) {
+    // Initialize backlight timer on first run
+    if (backlight_timer == 0) {
+        backlight_timer = timer_read32();
+    }
+
+    // If we haven't already turned backlight off, and it's been idle too long
+    if (!backlight_timed_out && timer_elapsed32(backlight_timer) > BACKLIGHT_TIMEOUT) {
+        saved_backlight_level = get_backlight_level();  // remember current brightness
+        backlight_set(0);                               // turn it off
+        backlight_timed_out = true;
+    }
 }
